@@ -94,6 +94,24 @@ func (f *File) GetMappingForOffsetForUUID(uuid types.UUID, offset uint64) (*Cach
 	return nil, fmt.Errorf("offset %#x not within any mappings file offset range", offset)
 }
 
+// GetSubCacheUUIDForOffset returns the subcache UUID for a given offset
+func (f *File) GetSubCacheUUIDForOffset(offset uint64) (types.UUID, uint64, error) {
+	var uuid types.UUID
+	var startOffset uint64
+	for _, subcache := range f.SubCacheInfo {
+		if subcache.CacheVMOffset <= offset {
+			uuid = subcache.UUID
+			startOffset = subcache.CacheVMOffset
+		} else {
+			break
+		}
+	}
+	if uuid.IsNull() {
+		return uuid, 0, fmt.Errorf("offset %#x not within any subcaches file offset range", offset)
+	}
+	return uuid, startOffset, nil
+}
+
 // GetMappingForVMAddress returns the mapping containing a given virtual address
 func (f *File) GetMappingForVMAddress(address uint64) (types.UUID, *CacheMappingWithSlideInfo, error) {
 	for uuid := range f.MappingsWithSlideInfo {

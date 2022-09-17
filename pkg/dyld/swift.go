@@ -76,6 +76,7 @@ type swiftHashTable struct {
 
 type SwiftHashTable struct {
 	CacheOffset uint64
+	UUID        types.UUID
 	swiftHashTable
 	Tab        []byte  /* tab[mask+1] (always power-of-2). Rounded up to roundedTabSize */
 	CheckBytes []byte  /* check byte for each string */
@@ -109,16 +110,21 @@ func (s *SwiftHashTable) Read(r *io.SectionReader) error {
 
 func (f *File) getSwiftTypeHashTable() (*SwiftHashTable, error) {
 	if f.IsDyld4 && f.Headers[f.UUID].SwiftOptsOffset > 0 {
-		r := io.NewSectionReader(f.r[f.UUID], int64(f.Headers[f.UUID].SwiftOptsOffset), int64(f.Headers[f.UUID].SwiftOptsSize))
-
-		var h SwiftOptimizationHeader
-		if err := binary.Read(r, binary.LittleEndian, &h); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", h, err)
+		uuid, start, err := f.GetSubCacheUUIDForOffset(f.Headers[f.UUID].SwiftOptsOffset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get subcache uuid for offset: %v", err)
 		}
 
-		shash := SwiftHashTable{CacheOffset: h.TypeConformanceHashTableCacheOffset}
+		r := io.NewSectionReader(f.r[uuid], int64(f.Headers[f.UUID].SwiftOptsOffset-start), 1<<63-1)
 
-		if err := shash.Read(io.NewSectionReader(f.r[f.UUID], 0, 1<<63-1)); err != nil {
+		var hdr SwiftOptimizationHeader
+		if err := binary.Read(r, binary.LittleEndian, &hdr); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", hdr, err)
+		}
+
+		shash := SwiftHashTable{CacheOffset: hdr.TypeConformanceHashTableCacheOffset - start, UUID: uuid}
+
+		if err := shash.Read(io.NewSectionReader(f.r[uuid], 0, 1<<63-1)); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", shash, err)
 		}
 
@@ -172,7 +178,7 @@ func (f *File) getSwiftForeignTypeHashTable() (*SwiftHashTable, error) {
 
 func (f *File) dumpSwiftOffsets(h *SwiftHashTable) {
 	// sort.Slice(h.Offsets, func(i, j int) bool { return h.Offsets[i] < h.Offsets[j] })
-	sr := io.NewSectionReader(f.r[f.UUID], 0, 1<<63-1)
+	sr := io.NewSectionReader(f.r[h.UUID], 0, 1<<63-1)
 	for _, ptr := range h.Offsets {
 		if ptr != int32(h.SentinelTarget) {
 			sr.Seek(int64(int32(h.CacheOffset)+ptr), io.SeekStart)
@@ -195,7 +201,6 @@ func (f *File) dumpSwiftOffsets(h *SwiftHashTable) {
 			}
 			fmt.Printf("    0x%x: %s\n", addr, strings.Trim(s, "\x00"))
 		}
-
 	}
 }
 
@@ -210,5 +215,5 @@ func (f *File) GetAllSwiftTypes(print bool) (map[string]uint64, error) {
 		f.dumpSwiftOffsets(shash)
 	}
 
-	return f.offsetsToMap(shash.Offsets, int64(shash.CacheOffset), f.UUID), nil // FIXME: handle multiple UUIDs
+	return f.offsetsToMap(shash.Offsets, int64(shash.CacheOffset), shash.UUID), nil
 }
