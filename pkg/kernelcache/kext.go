@@ -183,6 +183,31 @@ func findCStringVMaddr(m *macho.File, cstr string) (uint64, error) {
 	return 0, fmt.Errorf("string not found in MachO")
 }
 
+func PrelinkInfoDictionaryFromMacho(m *macho.File) (map[string]CFBundle, error) {
+	if infoSec := m.Section("__PRELINK_INFO", "__info"); infoSec != nil {
+		data, err := infoSec.Data()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read __PRELINK_INFO.__info section: %v", err)
+		}
+
+		var prelink PrelinkInfo
+		decoder := plist.NewDecoder(bytes.NewReader(bytes.Trim([]byte(data), "\x00")))
+		err = decoder.Decode(&prelink)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode __PRELINK_INFO.__info section: %v", err)
+		}
+
+		bundles := make(map[string]CFBundle)
+
+		for _, bundle := range prelink.PrelinkInfoDictionary {
+			bundles[bundle.ID] = bundle
+		}
+
+		return bundles, nil
+	}
+	return map[string]CFBundle{}, nil
+}
+
 // KextList lists all the kernel extensions in the kernelcache
 func KextList(kernel string, diffable bool) ([]string, error) {
 	var out []string

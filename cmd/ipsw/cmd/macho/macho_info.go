@@ -40,6 +40,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/ipsw/internal/certs"
 	"github.com/blacktop/ipsw/internal/utils"
+	"github.com/blacktop/ipsw/pkg/kernelcache"
 	"github.com/blacktop/ipsw/pkg/plist"
 	"github.com/fullsailor/pkcs7"
 	"github.com/pkg/errors"
@@ -120,7 +121,7 @@ var machoInfoCmd = &cobra.Command{
 		extractPath := viper.GetString("macho.info.output")
 
 		if len(filesetEntry) == 0 && extractfilesetEntry {
-			return fmt.Errorf("you must supply a --fileset-entry|-t AND --extract-fileset-entry|-x to extract a file-set entry")
+			// return fmt.Errorf("you must supply a --fileset-entry|-t AND --extract-fileset-entry|-x to extract a file-set entry")
 		}
 
 		onlySig := !showHeader && !showLoadCommands && showSignature && !showEntitlements && !showObjC && !showSymbols && !showFixups && !showFuncStarts && !dumpStrings
@@ -252,12 +253,50 @@ var machoInfoCmd = &cobra.Command{
 			}
 		} else if viper.GetBool("macho.info.all-fileset-entries") {
 			if m.FileTOC.FileHeader.Type == types.MH_FILESET {
+				bundles, err := kernelcache.PrelinkInfoDictionaryFromMacho(m)
+				if err != nil {
+					return err
+				}
+
+
 				for _, fe := range m.FileSets() {
-					mfe, err := m.GetFileSetFileByName(fe.EntryID)
+					if extractfilesetEntry {
+						if fe.EntryID == "com.apple.kernel" {
+							continue
+						}
+
+
+				var dcf *fixupchains.DyldChainedFixups
+				if m.HasFixups() {
+					dcf, err = m.DyldChainedFixups()
 					if err != nil {
-						return fmt.Errorf("failed to parse entry %s: %v", filesetEntry, err)
+						return fmt.Errorf("failed to parse fixups from in memory MachO: %v", err)
 					}
-					fmt.Printf("\n%s\n\n%s\n", fe.EntryID, mfe.FileTOC.String())
+				}
+
+				baseAddress := m.GetBaseAddress()
+
+						mfe, err := m.GetFileSetFileByName(fe.EntryID)
+						if err != nil {
+							return fmt.Errorf("failed to parse entry %s: %v", filesetEntry, err)
+						}
+
+						fmt.Printf("%s %v", fe.EntryID, bundles[fe.EntryID])
+						fullPath := filepath.Join(folder, bundles[fe.EntryID].BundlePath, bundles[fe.EntryID].RelativePath)
+						err = os.MkdirAll(filepath.Dir(fullPath), os.FileMode(int(0777)))
+						if err != nil {
+							return fmt.Errorf("failed to prepare output path %s: %v", fullPath, err)
+						}
+						fmt.Printf("%s", fullPath)
+
+						err = mfe.Export(fullPath, dcf, baseAddress, nil) // TODO: do I want to add any extra syms?
+						if err != nil {
+							return fmt.Errorf("failed to export entry MachO %s; %v", filesetEntry, err)
+						}
+						log.Infof("Created %s", filepath.Join(folder, filesetEntry))
+					} else {
+						fmt.Printf("\n%s\n", fe.EntryID)
+					}
 				}
 			} else {
 				return fmt.Errorf("MachO type is not MH_FILESET (cannot use --fileset-entry)")
