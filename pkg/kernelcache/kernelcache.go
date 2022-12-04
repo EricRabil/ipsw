@@ -183,7 +183,7 @@ func DecompressKernelManagement(kcache, outputDir string) error {
 		return errors.Wrap(err, "failed parse compressed kernelcache Img4")
 	}
 
-	kcache = filepath.Join(outputDir, kcache+".decompressed")
+	kcache = outputDir
 	os.MkdirAll(filepath.Dir(kcache), 0755)
 
 	if bytes.Contains(km.IM4P.Data[:4], []byte("bvx2")) {

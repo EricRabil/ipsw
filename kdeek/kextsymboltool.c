@@ -388,11 +388,11 @@ store_symbols(char * file, vm_size_t file_size, struct symbol * symbols, uint32_
 					indirect_len = indirect_term - indirect + 1;
 				} else if (*scan == '\0') {
 					fprintf(stderr, "bad format in symbol line: %s\n", line);
-					exit(1);
+					return 1;
 				}
 			} else if (*scan != '\0' && *scan != '-') {
 				fprintf(stderr, "bad format in symbol line: %s\n", line);
-				exit(1);
+				return 1;
 			}
 		}
 
@@ -422,7 +422,7 @@ store_symbols(char * file, vm_size_t file_size, struct symbol * symbols, uint32_
 
 					if (option_len >= sizeof(optionstr)) {
 						fprintf(stderr, "option too long in symbol line: %s\n", line);
-						exit(1);
+						return 1;
 					}
 					memcpy(optionstr, option, option_len);
 					optionstr[option_len] = '\0';
@@ -434,14 +434,14 @@ store_symbols(char * file, vm_size_t file_size, struct symbol * symbols, uint32_
 					}
 				} else if (*scan == '\0') {
 					fprintf(stderr, "bad format in symbol line: %s\n", line);
-					exit(1);
+					return 1;
 				}
 			}
 		}
 
 		if (idx >= max_symbols) {
 			fprintf(stderr, "symbol[%d/%d] overflow: %s\n", idx, max_symbols, line);
-			exit(1);
+			return 1;
 		}
 
 		*name_term = '\0';
@@ -491,8 +491,8 @@ lookup_arch(const char *archstring)
 
 /*********************************************************************
 *********************************************************************/
-int
-main(int argc, char * argv[])
+extern int
+kextsymboltool(int argc, char * argv[])
 {
 	ToolError   err;
 	int                 i, fd;
@@ -540,14 +540,14 @@ main(int argc, char * argv[])
 
 		if (i == (argc - 1)) {
 			fprintf(stderr, "bad arguments: %s\n", argv[i]);
-			exit(1);
+			return 1;
 		}
 
 		if (!strcmp("-arch", argv[i])) {
 			target_arch = lookup_arch(argv[i + 1]);
 			if (!target_arch) {
 				fprintf(stderr, "unknown architecture name: %s\n", argv[i + 1]);
-				exit(1);
+				return 1;
 			}
 			continue;
 		}
@@ -562,12 +562,12 @@ main(int argc, char * argv[])
 			import = false;
 		} else {
 			fprintf(stderr, "unknown option: %s\n", argv[i]);
-			exit(1);
+			return 1;
 		}
 
 		err = readFile(argv[i + 1], &files[num_files].mapped, &files[num_files].mapped_size);
 		if (kErrorNone != err) {
-			exit(1);
+			return 1;
 		}
 
 		if (files[num_files].mapped && files[num_files].mapped_size) {
@@ -579,7 +579,7 @@ main(int argc, char * argv[])
 
 	if (!output_name) {
 		fprintf(stderr, "no output file\n");
-		exit(1);
+		return 1;
 	}
 
 	num_import_syms = 0;
@@ -961,9 +961,14 @@ finish:
 		if (output_name && strncmp(output_name, "/dev/", 5)) {
 			unlink(output_name);
 		}
-		exit(1);
+		return 1;
 	} else {
-		exit(0);
+		return 0;
 	}
-	return 0;
+}
+
+void freeChars(int argc, char * argv[]) {
+	for (int count = 0; count < argc; count++) {
+		free(argv[count]);
+	}
 }
