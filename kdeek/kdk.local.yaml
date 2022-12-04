@@ -1,5 +1,0 @@
-volume_group: B3B9C624-594F-4E6F-B070-B01590452816
-custom_kernel_path: /Users/ericrabil/Downloads/kernel.release.t6000
-kernelcache_dst: /Users/ericrabil/Downloads/kernelcache.custom
-kdk_root: /Users/ericrabil/Downloads/Custom.kdk
-kernel_management: true

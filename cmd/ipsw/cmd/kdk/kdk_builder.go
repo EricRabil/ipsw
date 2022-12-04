@@ -1,4 +1,4 @@
-package main
+package kdk
 
 //#cgo CFLAGS: -x c -Wno-deprecated-declarations
 // #cgo LDFLAGS: -lstdc++
@@ -48,13 +48,37 @@ func createSymbolset(imports []string, export string, output string) int {
 	return int(C.kextsymboltool(C.int(len(args)), charArray))
 }
 
-func allSymbols(path string) ([]string, error) {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("nm -gj \"%s\" | sort -u", path))
+func bash(command string) (*bytes.Buffer, error) {
+	cmd := exec.Command("bash", "-c", command)
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
 	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	return &out, nil
+}
+
+func bashBound(command string) error {
+	fmt.Printf("bash: %s\n", command)
+	cmd := exec.Command("bash", "-c", command)
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func allSymbols(path string) ([]string, error) {
+	out, err := bash(fmt.Sprintf("nm -gj \"%s\" | sort -u", path))
+	if err != nil {
 		return nil, err
 	}
 
@@ -139,7 +163,9 @@ func extractSymbolsets(path string) (map[string][]string, error) {
 
 type KDKBuilder struct {
 	VolumeGroup                string `yaml:"volume_group"`
+	OriginalKernelcachePath    string `yaml:"kernelcache_src"`
 	KernelPath                 string `yaml:"custom_kernel_path"`
+	KernelcachePath            string `yaml:"kernelcache_path"`
 	DestinationKernelcachePath string `yaml:"kernelcache_dst"`
 	DestinationKDKPath         string `yaml:"kdk_root"`
 	KernelManagement           bool   `yaml:"kernel_management"`
@@ -201,6 +227,9 @@ func NewPrebootFromVolumeGroup(group string) (*Preboot, error) {
 }
 
 func (k *KDKBuilder) LocateOriginalKernelcache() (string, error) {
+	if len(k.OriginalKernelcachePath) != 0 {
+		return k.OriginalKernelcachePath, nil
+	}
 	preboot, err := NewPrebootFromVolumeGroup(k.VolumeGroup)
 	if err != nil {
 		return "", err
@@ -223,17 +252,17 @@ func (k *KDKBuilder) KDKKernelCachesPath() string {
 }
 
 func (k *KDKBuilder) DecompressedKernelcachePath() string {
-	return path.Join(k.KDKKernelCachesPath(), "kernelcache.decompressed")
+	return k.KernelcachePath
 }
 
 func (k *KDKBuilder) PrepareDecompressedKernelcache() error {
+	if exists, err := pathExists(k.DecompressedKernelcachePath()); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
 	if err := mkdirp(k.KDKKernelCachesPath()); err != nil {
 		return err
-	}
-	if _, err := os.Stat(k.DecompressedKernelcachePath()); err != nil && !os.IsNotExist(err) {
-		return err
-	} else if err == nil {
-		return nil
 	}
 	compressed, err := k.LocateOriginalKernelcache()
 	if err != nil {
@@ -353,15 +382,7 @@ func (k *KDKBuilder) ExtractKexts() error {
 }
 
 func rsync(src string, dst string) error {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("rsync -rav \"%s\" \"%s\"", src, dst))
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
+	return bashBound(fmt.Sprintf("rsync -rav \"%s\" \"%s\"", src, dst))
 }
 
 func overlay(src string, dst string) error {
@@ -503,34 +524,61 @@ func (k *KDKBuilder) PrepareSymbolsetProxies() error {
 	return nil
 }
 
-func main() {
-	builder, err := NewKDKBuilderFromPath("./kdk.local.yaml")
-	if err != nil {
-		panic(err)
+func (k *KDKBuilder) BuildKDK() error {
+	if err := k.ExtractKexts(); err != nil {
+		return err
 	}
-	if err = builder.ExtractKexts(); err != nil {
-		panic(err)
+	if err := k.PrepareSymbolsetProxies(); err != nil {
+		return err
 	}
-	if err = builder.PrepareSymbolsetProxies(); err != nil {
-		panic(err)
-	}
-	return
+	return nil
+}
 
-	fmt.Printf("I'm alive.\n")
-	// str := C.CString("")
-	if createSymbolset([]string{"allsymbols_stub"}, "com.apple.kpi.private", "Private") != 0 {
-		fmt.Printf("failed to create symbolset\n")
+func (k *KDKBuilder) CreateKernelcache() error {
+	bundles := []string{}
+
+	kexts, err := os.ReadDir(k.KDKKextRoot())
+	if err != nil {
+		return err
 	}
 
-	symbols, err := allSymbols("/System/Library/Kernels/kernel")
-	if err != nil {
-		panic(err)
+	for _, kext := range kexts {
+		bundles = append(bundles, path.Join(k.KDKKextRoot(), kext.Name()))
 	}
-	fmt.Printf("%v", len(symbols))
 
-	symbolSets, err := extractSymbolsets("/System/Library/Kernels/Kernel")
+	plugins, err := os.ReadDir(path.Join(k.DestinationKDKPath, proxyBundlePath))
 	if err != nil {
-		panic(err)
+		return err
 	}
-	fmt.Printf("%v", symbolSets)
+
+	for _, plugin := range plugins {
+		bundles = append(bundles, path.Join(path.Join(k.DestinationKDKPath, proxyBundlePath), plugin.Name()))
+	}
+
+	for i, bundlePath := range bundles {
+		bundles[i] = fmt.Sprintf("-b \"%s\"", bundlePath)
+	}
+
+	err = bashBound(fmt.Sprintf(`
+	kmutil create \
+        --allow-missing-kdk \
+        --kdk "%s" \
+        -a arm64e \
+        -z \
+        -V release \
+        -n boot \
+        -B "%s" \
+        -k "%s" \
+        -r /System/Library/Extensions \
+        -r /System/Library/DriverExtensions \
+        -r "%s/System/Library/Extensions" \
+        -r "%s/System/Library/Extensions/System.kext/PlugIns" \
+        -x %s
+	`, k.DestinationKDKPath, k.DestinationKernelcachePath, k.KernelPath, k.DestinationKDKPath, k.DestinationKDKPath, strings.Join(bundles, " ")))
+
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Custom kernel cache written to %s\n", k.DestinationKernelcachePath)
+	return nil
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/dyld"
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/idev"
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/img4"
+	"github.com/blacktop/ipsw/cmd/ipsw/cmd/kdk"
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/kernel"
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/macho"
 	"github.com/blacktop/ipsw/cmd/ipsw/cmd/ota"
@@ -93,6 +94,7 @@ func init() {
 	rootCmd.AddCommand(kernel.KernelcacheCmd)
 	rootCmd.AddCommand(macho.MachoCmd)
 	rootCmd.AddCommand(ota.OtaCmd)
+	rootCmd.AddCommand(kdk.KDKCmd)
 	// Settings
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 }
