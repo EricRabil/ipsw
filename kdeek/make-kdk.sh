@@ -107,6 +107,9 @@ case $1 in
     "make-kernelcache")
         make_kernelcache
         ;;
+    "all")
+        decompress_kernelcache extract_kexts assemble_kdk make_kernelcache
+        ;;
     *)
         echo "wat"
         ;;
