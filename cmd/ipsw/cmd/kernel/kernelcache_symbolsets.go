@@ -111,6 +111,13 @@ var symbolsetsCmd = &cobra.Command{
 			for _, sym := range sset.Symbols {
 				fmt.Printf("%s%s\n", sym.Prefix, sym.Name)
 			}
+			if os.Getenv("DUMP_SYMBOLSETS") == "1" {
+				symbols := make([]string, len(sset.Symbols))
+				for i, sym := range sset.Symbols {
+					symbols[i] = fmt.Sprintf("%s%s", sym.Prefix, sym.Name)
+				}
+				os.WriteFile(sset.ID, []byte(strings.Join(symbols, "\n")), 0660)
+			}
 		}
 
 		return nil
